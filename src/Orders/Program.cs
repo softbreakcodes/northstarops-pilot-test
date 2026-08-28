@@ -11,3 +11,7 @@ app.MapGet("/orders/health", () =>
 });
 
 app.Run();
+
+public partial class Program
+{
+}
