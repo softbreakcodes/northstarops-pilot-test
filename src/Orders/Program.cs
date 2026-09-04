@@ -15,8 +15,7 @@ app.MapGet("/orders/readiness", () =>
     return Results.Ok(new
     {
         status = "ready",
-        service = "orders",
-        version = "1.0"
+        service = "orders"
     });
 });
 
