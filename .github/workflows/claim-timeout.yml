@@ -4,28 +4,153 @@ on:
   schedule:
     - cron: "0 * * * *"
   workflow_dispatch:
+    inputs:
+      timeout_hours:
+        description: "Manual test timeout in hours"
+        required: false
+        default: "48"
 
 permissions:
   contents: read
   issues: write
+  pull-requests: read
+
+concurrency:
+  group: claim-${{ github.repository }}
+  cancel-in-progress: false
 
 jobs:
   check-timeouts:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Find expired claims
+      - name: Expire stale claims
         env:
           GH_TOKEN: ${{ github.token }}
           REPOSITORY: ${{ github.repository }}
+          TIMEOUT_HOURS: ${{ inputs.timeout_hours || '48' }}
         shell: bash
         run: |
           set -euo pipefail
 
-          echo "Claim timeout scan started for ${REPOSITORY}"
+          if ! [[ "${TIMEOUT_HOURS}" =~ ^[0-9]+$ ]]; then
+            echo "TIMEOUT_HOURS must be a non-negative integer."
+            exit 1
+          fi
 
-          gh api \
-            -X GET \
-            search/issues \
-            -f q="repo:${REPOSITORY} is:issue is:open label:\"status: claimed\"" \
-            --jq '.items[] | {number, title}'
+          now_epoch="$(date -u +%s)"
+          timeout_seconds="$((TIMEOUT_HOURS * 3600))"
+
+          mapfile -t issue_numbers < <(
+            gh api \
+              --paginate \
+              -X GET \
+              search/issues \
+              -f q="repo:${REPOSITORY} is:issue is:open label:\"status: claimed\"" \
+              -f per_page=100 \
+              --jq '.items[].number'
+          )
+
+          if [[ "${#issue_numbers[@]}" -eq 0 ]]; then
+            echo "No claimed issues found."
+            exit 0
+          fi
+
+          for issue_number in "${issue_numbers[@]}"; do
+            echo "Checking Issue #${issue_number}"
+
+            issue_json="$(gh api "repos/${REPOSITORY}/issues/${issue_number}")"
+            claimant="$(jq -r '.assignees[0].login // empty' <<<"${issue_json}")"
+
+            if [[ -z "${claimant}" ]]; then
+              echo "Issue #${issue_number} has no assignee; skipping."
+              continue
+            fi
+
+            claim_record="$(
+              gh api \
+                --paginate \
+                -X GET \
+                "repos/${REPOSITORY}/issues/${issue_number}/comments" \
+                -f per_page=100 \
+                --jq '.[] | select(.user.login == "github-actions[bot]" and (.body | contains("<!-- northstarops-claim -->"))) | [.created_at, .id] | @tsv' \
+              | tail -n 1
+            )"
+
+            if [[ -z "${claim_record}" ]]; then
+              echo "Issue #${issue_number} has no claim marker; treating as legacy claim and skipping."
+              continue
+            fi
+
+            claim_created_at="${claim_record%%$'\t'*}"
+            claim_epoch="$(date -u -d "${claim_created_at}" +%s)"
+            deadline_epoch="$((claim_epoch + timeout_seconds))"
+
+            if (( now_epoch < deadline_epoch )); then
+              remaining_seconds="$((deadline_epoch - now_epoch))"
+              echo "Issue #${issue_number} is still within timeout (${remaining_seconds}s remaining)."
+              continue
+            fi
+
+            qualifying_pr=""
+
+            while IFS= read -r pr_url; do
+              [[ -z "${pr_url}" ]] && continue
+
+              pr_endpoint="${pr_url#https://api.github.com/}"
+              pr_json="$(gh api "${pr_endpoint}")"
+              pr_author="$(jq -r '.user.login // empty' <<<"${pr_json}")"
+              pr_created_at="$(jq -r '.created_at // empty' <<<"${pr_json}")"
+              pr_state="$(jq -r '.state // empty' <<<"${pr_json}")"
+              pr_merged="$(jq -r '.merged // false' <<<"${pr_json}")"
+
+              [[ "${pr_author}" != "${claimant}" ]] && continue
+              [[ -z "${pr_created_at}" ]] && continue
+
+              pr_epoch="$(date -u -d "${pr_created_at}" +%s)"
+
+              if (( pr_epoch <= deadline_epoch )) && { [[ "${pr_state}" == "open" ]] || [[ "${pr_merged}" == "true" ]]; }; then
+                qualifying_pr="${pr_url}"
+                break
+              fi
+            done < <(
+              gh api \
+                --paginate \
+                -H "Accept: application/vnd.github+json" \
+                "repos/${REPOSITORY}/issues/${issue_number}/timeline" \
+                -f per_page=100 \
+                --jq '.[] | select(.event == "cross-referenced" and .source.issue.pull_request != null) | .source.issue.pull_request.url' \
+              | sort -u
+            )
+
+            if [[ -n "${qualifying_pr}" ]]; then
+              echo "Issue #${issue_number} has a qualifying linked PR: ${qualifying_pr}"
+              continue
+            fi
+
+            echo "Expiring claim on Issue #${issue_number} for @${claimant}"
+
+            gh api \
+              -X DELETE \
+              "repos/${REPOSITORY}/issues/${issue_number}/assignees" \
+              -f "assignees[]=${claimant}" \
+              >/dev/null
+
+            gh api \
+              -X POST \
+              "repos/${REPOSITORY}/issues/${issue_number}/labels" \
+              -f "labels[]=status: available" \
+              >/dev/null
+
+            encoded_claimed="$(printf '%s' 'status: claimed' | jq -sRr @uri)"
+            gh api \
+              -X DELETE \
+              "repos/${REPOSITORY}/issues/${issue_number}/labels/${encoded_claimed}" \
+              >/dev/null
+
+            gh api \
+              -X POST \
+              "repos/${REPOSITORY}/issues/${issue_number}/comments" \
+              -f body=$'<!-- northstarops-claim-timeout -->\n⏱️ @${claimant} için 48 saatlik claim süresi doldu ve bağlı bir Pull Request bulunamadı. Issue tekrar claim edilebilir duruma alındı.' \
+              >/dev/null
+          done
