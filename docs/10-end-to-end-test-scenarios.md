@@ -127,6 +127,25 @@ Mümkünse kontrollü test ortamında Project token veya Project Status configur
 
 Beklenen: claim veya timeout yarım state bırakmamalı; rollback çalışmalı ve workflow failure üretmelidir.
 
+## Test 11 — ChatGPT-assisted Issue-context review
+
+Bir test Issue açıkça ölçülebilir Acceptance Criteria, Allowed Scope ve Do Not Change kurallarıyla hazırlanır. Contributor PR içinde kontrollü bir contract veya scope ihlali yapar.
+
+PR `Ready for Review` olduktan sonra maintainer ChatGPT'ye PR numarası/linki vererek bağlı Issue bağlamında review ister.
+
+Beklenen:
+
+- doğru bağlı Issue okunur,
+- kontrollü ihlal yakalanır,
+- Acceptance Criteria tek tek değerlendirilir,
+- scope değerlendirilir,
+- test eksikleri varsa belirtilir,
+- sonuç `APPROVE` veya `REQUEST_CHANGES` önerisine indirgenir.
+
+Contributor aynı branch/PR üzerinde düzeltme yaptıktan sonra re-review istenir.
+
+Beklenen: eski bulgu giderilmiş olarak yeniden değerlendirilir ve yeni PR açılmaz.
+
 ## Release gate
 
-Production contributor'ları davet etmeden önce Test 1–9 PASS olmalıdır. Test 10 en az bir staging/pilot ortamında doğrulanmış olmalıdır.
+Production contributor'ları davet etmeden önce Test 1–9 ve Test 11 PASS olmalıdır. Test 10 en az bir staging/pilot ortamında doğrulanmış olmalıdır.
