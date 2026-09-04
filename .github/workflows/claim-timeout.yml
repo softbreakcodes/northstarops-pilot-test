@@ -1,0 +1,31 @@
+name: Claim Timeout
+
+on:
+  schedule:
+    - cron: "0 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  check-timeouts:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Find expired claims
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "Claim timeout scan started for ${REPOSITORY}"
+
+          gh api \
+            -X GET \
+            search/issues \
+            -f q="repo:${REPOSITORY} is:issue is:open label:\"status: claimed\"" \
+            --jq '.items[] | {number, title}'
