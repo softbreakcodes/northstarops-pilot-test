@@ -59,7 +59,7 @@ jobs:
           )
 
           if [[ "${#linked_issues[@]}" -ne 1 ]]; then
-            reject_pr "❌ @${PR_AUTHOR}, PR açıklamasında bağlı bir Issue bulunamadı. NorthStarOps'ta her PR tam olarak bir Issue'ya bağlı olmalıdır. PR açıklamana örneğin \`Closes #17\` satırını ekleyip tekrar deneyebilirsin."
+            reject_pr "❌ @${PR_AUTHOR}, PR açıklamasında bağlı bir Issue bulunamadı. NorthStarOps'ta her PR tam olarak bir Issue'ya bağlı olmalıdır. PR açıklamana örneğin \`Closes #123\` satırını ekleyip tekrar deneyebilirsin."
           fi
 
           issue_number="${linked_issues[0]}"
