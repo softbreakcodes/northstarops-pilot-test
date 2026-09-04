@@ -1,1 +1,1 @@
-Issue #42 Ready for Review to In Review test.
+Issue #42 review revision flow confirmed.
