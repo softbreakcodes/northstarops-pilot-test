@@ -33,11 +33,11 @@ jobs:
 
           issue_json="$(gh api "repos/${REPOSITORY}/issues/${ISSUE_NUMBER}")"
 
-          if ! jq -e '.labels | any(.name == "available")' <<<"${issue_json}" >/dev/null; then
+          if ! jq -e '.labels | any(.name == "status: available")' <<<"${issue_json}" >/dev/null; then
             gh api \
               -X POST \
               "repos/${REPOSITORY}/issues/${ISSUE_NUMBER}/comments" \
-              -f body="@${ACTOR} bu Issue şu anda claim edilebilir değil. Yalnızca \`available\` etiketli Issue'lar claim edilebilir."
+              -f body="@${ACTOR} bu Issue şu anda claim edilebilir değil. Yalnızca \`status: available\` etiketli Issue'lar claim edilebilir."
             exit 0
           fi
 
@@ -46,14 +46,14 @@ jobs:
             gh api \
               -X POST \
               "repos/${REPOSITORY}/issues/${ISSUE_NUMBER}/comments" \
-              -f body="@${ACTOR} bu Issue zaten @${current_assignee} tarafından claim edilmiş. Lütfen başka bir \`available\` Issue seç."
+              -f body="@${ACTOR} bu Issue zaten @${current_assignee} tarafından claim edilmiş. Lütfen başka bir \`status: available\` Issue seç."
             exit 0
           fi
 
           active_claims="$(gh api \
             -X GET \
             search/issues \
-            -f q="repo:${REPOSITORY} is:issue is:open label:claimed assignee:${ACTOR}" \
+            -f q="repo:${REPOSITORY} is:issue is:open label:\"status: claimed\" assignee:${ACTOR}" \
             --jq '.total_count')"
 
           if [[ "${active_claims}" -gt 0 ]]; then
@@ -83,19 +83,11 @@ jobs:
 
           gh api \
             -X POST \
-            "repos/${REPOSITORY}/labels" \
-            -f name="claimed" \
-            -f color="D4C5F9" \
-            -f description="This issue has an active contributor claim" \
-            >/dev/null 2>&1 || true
-
-          gh api \
-            -X POST \
             "repos/${REPOSITORY}/issues/${ISSUE_NUMBER}/labels" \
-            -f "labels[]=claimed" \
+            -f "labels[]=status: claimed" \
             >/dev/null
 
-          encoded_available="$(printf '%s' 'available' | jq -sRr @uri)"
+          encoded_available="$(printf '%s' 'status: available' | jq -sRr @uri)"
           gh api \
             -X DELETE \
             "repos/${REPOSITORY}/issues/${ISSUE_NUMBER}/labels/${encoded_available}" \
