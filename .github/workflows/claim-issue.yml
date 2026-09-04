@@ -104,19 +104,14 @@ jobs:
             exit 1
           fi
 
-          issue_node_id="$(GH_TOKEN="${PROJECT_TOKEN}" gh api graphql \
+          issue_project_json="$(GH_TOKEN="${PROJECT_TOKEN}" gh api graphql \
             -f query='query($owner:String!,$repo:String!,$number:Int!) { repository(owner:$owner,name:$repo) { issue(number:$number) { id projectItems(first:100) { nodes { id project { id } } } } } }' \
             -F owner="${owner}" \
             -F repo="${repo}" \
-            -F number="${ISSUE_NUMBER}" \
-            --jq '.data.repository.issue.id')"
+            -F number="${ISSUE_NUMBER}")"
 
-          item_id="$(GH_TOKEN="${PROJECT_TOKEN}" gh api graphql \
-            -f query='query($owner:String!,$repo:String!,$number:Int!) { repository(owner:$owner,name:$repo) { issue(number:$number) { projectItems(first:100) { nodes { id project { id } } } } } }' \
-            -F owner="${owner}" \
-            -F repo="${repo}" \
-            -F number="${ISSUE_NUMBER}" \
-            --jq --arg project_id "${project_id}" '.data.repository.issue.projectItems.nodes[] | select(.project.id == $project_id) | .id' | head -n1)"
+          issue_node_id="$(jq -r '.data.repository.issue.id' <<<"${issue_project_json}")"
+          item_id="$(jq -r --arg project_id "${project_id}" '.data.repository.issue.projectItems.nodes[] | select(.project.id == $project_id) | .id' <<<"${issue_project_json}" | head -n1)"
 
           if [[ -z "${item_id}" ]]; then
             item_id="$(GH_TOKEN="${PROJECT_TOKEN}" gh api graphql \
