@@ -27,6 +27,8 @@ jobs:
       - name: Expire stale claims
         env:
           GH_TOKEN: ${{ github.token }}
+          PROJECT_TOKEN: ${{ secrets.NORTHSTAROPS_PROJECT_TOKEN }}
+          PROJECT_TITLE: NorthstarOps Pilot Test
           REPOSITORY: ${{ github.repository }}
           TIMEOUT_HOURS: ${{ inputs.timeout_hours || '24' }}
         shell: bash
@@ -38,8 +40,29 @@ jobs:
             exit 1
           fi
 
+          if [[ -z "${PROJECT_TOKEN}" ]]; then
+            echo "NORTHSTAROPS_PROJECT_TOKEN is required for Project status synchronization."
+            exit 1
+          fi
+
+          owner="${REPOSITORY%%/*}"
+          repo="${REPOSITORY##*/}"
           now_epoch="$(date -u +%s)"
           timeout_seconds="$((TIMEOUT_HOURS * 3600))"
+
+          project_json="$(GH_TOKEN="${PROJECT_TOKEN}" gh api graphql \
+            -f query='query($org:String!) { organization(login:$org) { projectsV2(first:100) { nodes { id title fields(first:100) { nodes { ... on ProjectV2SingleSelectField { id name options { id name } } } } } } } }' \
+            -F org="${owner}")"
+
+          project_id="$(jq -r --arg title "${PROJECT_TITLE}" '.data.organization.projectsV2.nodes[] | select(.title == $title) | .id' <<<"${project_json}" | head -n1)"
+          status_field_id="$(jq -r --arg title "${PROJECT_TITLE}" '.data.organization.projectsV2.nodes[] | select(.title == $title) | .fields.nodes[] | select(.name == "Status") | .id' <<<"${project_json}" | head -n1)"
+          available_option_id="$(jq -r --arg title "${PROJECT_TITLE}" '.data.organization.projectsV2.nodes[] | select(.title == $title) | .fields.nodes[] | select(.name == "Status") | .options[]? | select(.name == "Available") | .id' <<<"${project_json}" | head -n1)"
+          claimed_option_id="$(jq -r --arg title "${PROJECT_TITLE}" '.data.organization.projectsV2.nodes[] | select(.title == $title) | .fields.nodes[] | select(.name == "Status") | .options[]? | select(.name == "Claimed") | .id' <<<"${project_json}" | head -n1)"
+
+          if [[ -z "${project_id}" || -z "${status_field_id}" || -z "${available_option_id}" || -z "${claimed_option_id}" ]]; then
+            echo "Project Status configuration is incomplete for ${PROJECT_TITLE}."
+            exit 1
+          fi
 
           mapfile -t issue_numbers < <(
             gh api \
@@ -95,10 +118,11 @@ jobs:
             qualifying_pr=""
 
             while IFS= read -r pr_url; do
+              pr_url="${pr_url//$'\r'/}"
               [[ -z "${pr_url}" ]] && continue
 
               pr_endpoint="${pr_url#https://api.github.com/}"
-              pr_json="$(gh api "${pr_endpoint}")"
+              pr_json="$(gh api -X GET "${pr_endpoint}")"
               pr_author="$(jq -r '.user.login // empty' <<<"${pr_json}")"
               pr_created_at="$(jq -r '.created_at // empty' <<<"${pr_json}")"
               pr_state="$(jq -r '.state // empty' <<<"${pr_json}")"
@@ -116,6 +140,7 @@ jobs:
             done < <(
               gh api \
                 --paginate \
+                -X GET \
                 -H "Accept: application/vnd.github+json" \
                 "repos/${REPOSITORY}/issues/${issue_number}/timeline" \
                 -f per_page=100 \
@@ -126,6 +151,23 @@ jobs:
             if [[ -n "${qualifying_pr}" ]]; then
               echo "Issue #${issue_number} has a qualifying linked PR: ${qualifying_pr}"
               continue
+            fi
+
+            issue_project_json="$(GH_TOKEN="${PROJECT_TOKEN}" gh api graphql \
+              -f query='query($owner:String!,$repo:String!,$number:Int!) { repository(owner:$owner,name:$repo) { issue(number:$number) { id projectItems(first:100) { nodes { id project { id } } } } } }' \
+              -F owner="${owner}" \
+              -F repo="${repo}" \
+              -F number="${issue_number}")"
+
+            issue_node_id="$(jq -r '.data.repository.issue.id' <<<"${issue_project_json}")"
+            item_id="$(jq -r --arg project_id "${project_id}" '.data.repository.issue.projectItems.nodes[] | select(.project.id == $project_id) | .id' <<<"${issue_project_json}" | head -n1)"
+
+            if [[ -z "${item_id}" ]]; then
+              item_id="$(GH_TOKEN="${PROJECT_TOKEN}" gh api graphql \
+                -f query='mutation($project:ID!,$content:ID!) { addProjectV2ItemById(input:{projectId:$project,contentId:$content}) { item { id } } }' \
+                -F project="${project_id}" \
+                -F content="${issue_node_id}" \
+                --jq '.data.addProjectV2ItemById.item.id')"
             fi
 
             echo "Expiring claim on Issue #${issue_number} for @${claimant}"
@@ -147,6 +189,35 @@ jobs:
               -X DELETE \
               "repos/${REPOSITORY}/issues/${issue_number}/labels/${encoded_claimed}" \
               >/dev/null
+
+            if ! GH_TOKEN="${PROJECT_TOKEN}" gh api graphql \
+              -f query='mutation($project:ID!,$item:ID!,$field:ID!,$option:String!) { updateProjectV2ItemFieldValue(input:{projectId:$project,itemId:$item,fieldId:$field,value:{singleSelectOptionId:$option}}) { projectV2Item { id } } }' \
+              -F project="${project_id}" \
+              -F item="${item_id}" \
+              -F field="${status_field_id}" \
+              -F option="${available_option_id}" \
+              >/dev/null; then
+              gh api \
+                -X POST \
+                "repos/${REPOSITORY}/issues/${issue_number}/assignees" \
+                -f "assignees[]=${claimant}" \
+                >/dev/null || true
+
+              gh api \
+                -X POST \
+                "repos/${REPOSITORY}/issues/${issue_number}/labels" \
+                -f "labels[]=status: claimed" \
+                >/dev/null || true
+
+              encoded_available="$(printf '%s' 'status: available' | jq -sRr @uri)"
+              gh api \
+                -X DELETE \
+                "repos/${REPOSITORY}/issues/${issue_number}/labels/${encoded_available}" \
+                >/dev/null 2>&1 || true
+
+              echo "Project Status could not be updated to Available; Issue claim rollback completed."
+              exit 1
+            fi
 
             gh api \
               -X POST \
