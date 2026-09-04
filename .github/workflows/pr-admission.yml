@@ -59,7 +59,7 @@ jobs:
           )
 
           if [[ "${#linked_issues[@]}" -ne 1 ]]; then
-            reject_pr "❌ @${PR_AUTHOR} bu PR kabul edilemez. PR açıklamasında tam olarak bir Issue \\`Closes #<issue-number>\\` biçiminde bağlanmalıdır."
+            reject_pr "❌ @${PR_AUTHOR} bu PR kabul edilemez. PR açıklamasında tam olarak bir Issue 'Closes #<issue-number>' biçiminde bağlanmalıdır."
           fi
 
           issue_number="${linked_issues[0]}"
@@ -73,7 +73,7 @@ jobs:
           fi
 
           if ! jq -e '.labels | any(.name == "status: claimed")' <<<"${issue_json}" >/dev/null; then
-            reject_pr "❌ @${PR_AUTHOR} bu PR kabul edilemez. Issue #${issue_number} aktif bir claim durumunda değil. Önce Issue \\`/claim\\` ile alınmalıdır."
+            reject_pr "❌ @${PR_AUTHOR} bu PR kabul edilemez. Issue #${issue_number} aktif bir claim durumunda değil. Önce Issue /claim ile alınmalıdır."
           fi
 
           assignee="$(jq -r '.assignees[0].login // empty' <<<"${issue_json}")"
