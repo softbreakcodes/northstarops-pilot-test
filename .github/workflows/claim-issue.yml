@@ -96,4 +96,4 @@ jobs:
           gh api \
             -X POST \
             "repos/${REPOSITORY}/issues/${ISSUE_NUMBER}/comments" \
-            -f body="$(printf '%s\n%s' '<!-- northstarops-claim -->' "✅ @${ACTOR} bu Issue'yu claim etti. 48 saat içinde bağlı bir Draft PR açmalısın.")"
+            -f body="$(printf '%s\n%s' '<!-- northstarops-claim -->' "✅ @${ACTOR} bu Issue'yu claim etti. 24 saat içinde bağlı bir Draft PR açmalısın.")"
