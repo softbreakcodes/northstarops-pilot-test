@@ -1,0 +1,114 @@
+name: PR Review Status
+
+on:
+  pull_request_target:
+    types: [ready_for_review, converted_to_draft]
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: read
+
+concurrency:
+  group: pr-review-status-${{ github.repository }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  sync-status:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Sync linked Issue lifecycle status
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          ACTION: ${{ github.event.action }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          pr_body="$(jq -r '.pull_request.body // ""' "${GITHUB_EVENT_PATH}")"
+
+          mapfile -t linked_issues < <(
+            printf '%s\n' "${pr_body}" \
+              | grep -Eio '(close[sd]?|fix(e[sd])?|resolve[sd]?) +#[0-9]+' \
+              | grep -Eo '#[0-9]+' \
+              | tr -d '#' \
+              | sort -u \
+              || true
+          )
+
+          if [[ "${#linked_issues[@]}" -ne 1 ]]; then
+            echo "No unique linked Issue found; skipping status sync."
+            exit 0
+          fi
+
+          issue_number="${linked_issues[0]}"
+          issue_json="$(gh api "repos/${REPOSITORY}/issues/${issue_number}")"
+
+          if [[ "$(jq -r '.state' <<<"${issue_json}")" != "open" ]]; then
+            echo "Issue #${issue_number} is not open; skipping status sync."
+            exit 0
+          fi
+
+          assignee="$(jq -r '.assignees[0].login // empty' <<<"${issue_json}")"
+          if [[ -z "${assignee}" || "${assignee}" != "${PR_AUTHOR}" ]]; then
+            echo "Issue #${issue_number} assignee does not match PR author; skipping status sync."
+            exit 0
+          fi
+
+          ensure_label() {
+            local name="$1"
+            local color="$2"
+            local description="$3"
+            local encoded
+            encoded="$(printf '%s' "${name}" | jq -sRr @uri)"
+
+            if ! gh api "repos/${REPOSITORY}/labels/${encoded}" >/dev/null 2>&1; then
+              gh api \
+                -X POST \
+                "repos/${REPOSITORY}/labels" \
+                -f name="${name}" \
+                -f color="${color}" \
+                -f description="${description}" \
+                >/dev/null
+            fi
+          }
+
+          remove_label_if_present() {
+            local name="$1"
+            local encoded
+            encoded="$(printf '%s' "${name}" | jq -sRr @uri)"
+            gh api \
+              -X DELETE \
+              "repos/${REPOSITORY}/issues/${issue_number}/labels/${encoded}" \
+              >/dev/null 2>&1 || true
+          }
+
+          if [[ "${ACTION}" == "ready_for_review" ]]; then
+            ensure_label "status: in-review" "FBCA04" "Pull request review için hazır"
+
+            gh api \
+              -X POST \
+              "repos/${REPOSITORY}/issues/${issue_number}/labels" \
+              -f "labels[]=status: in-review" \
+              >/dev/null
+
+            remove_label_if_present "status: claimed"
+            echo "Issue #${issue_number}: Claimed -> In Review"
+            exit 0
+          fi
+
+          if [[ "${ACTION}" == "converted_to_draft" ]]; then
+            ensure_label "status: claimed" "0969DA" "Bir katılımcı tarafından sahiplenilmiş Issue"
+
+            gh api \
+              -X POST \
+              "repos/${REPOSITORY}/issues/${issue_number}/labels" \
+              -f "labels[]=status: claimed" \
+              >/dev/null
+
+            remove_label_if_present "status: in-review"
+            echo "Issue #${issue_number}: In Review -> Claimed"
+          fi
