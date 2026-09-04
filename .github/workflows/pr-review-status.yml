@@ -21,6 +21,8 @@ jobs:
       - name: Sync linked Issue lifecycle status
         env:
           GH_TOKEN: ${{ github.token }}
+          PROJECT_TOKEN: ${{ secrets.NORTHSTAROPS_PROJECT_TOKEN }}
+          PROJECT_TITLE: NorthstarOps Pilot Test
           REPOSITORY: ${{ github.repository }}
           PR_AUTHOR: ${{ github.event.pull_request.user.login }}
           ACTION: ${{ github.event.action }}
@@ -58,6 +60,11 @@ jobs:
             exit 0
           fi
 
+          if [[ -z "${PROJECT_TOKEN}" ]]; then
+            echo "NORTHSTAROPS_PROJECT_TOKEN is not configured."
+            exit 1
+          fi
+
           ensure_label() {
             local name="$1"
             local color="$2"
@@ -86,6 +93,61 @@ jobs:
               >/dev/null 2>&1 || true
           }
 
+          owner="${REPOSITORY%%/*}"
+          repo="${REPOSITORY##*/}"
+
+          project_json="$(GH_TOKEN="${PROJECT_TOKEN}" gh api graphql \
+            -f query='query($org:String!) { organization(login:$org) { projectsV2(first:100) { nodes { id title fields(first:100) { nodes { ... on ProjectV2SingleSelectField { id name options { id name } } } } } } } }' \
+            -F org="${owner}")"
+
+          project_id="$(jq -r --arg title "${PROJECT_TITLE}" '.data.organization.projectsV2.nodes[] | select(.title == $title) | .id' <<<"${project_json}" | head -n1)"
+          status_field_id="$(jq -r --arg title "${PROJECT_TITLE}" '.data.organization.projectsV2.nodes[] | select(.title == $title) | .fields.nodes[] | select(.name == "Status") | .id' <<<"${project_json}" | head -n1)"
+
+          case "${ACTION}" in
+            ready_for_review)
+              target_project_status="In Review"
+              ;;
+            converted_to_draft)
+              target_project_status="Claimed"
+              ;;
+            *)
+              echo "Unsupported action: ${ACTION}"
+              exit 0
+              ;;
+          esac
+
+          target_option_id="$(jq -r --arg title "${PROJECT_TITLE}" --arg option "${target_project_status}" '.data.organization.projectsV2.nodes[] | select(.title == $title) | .fields.nodes[] | select(.name == "Status") | .options[]? | select(.name == $option) | .id' <<<"${project_json}" | head -n1)"
+
+          if [[ -z "${project_id}" || -z "${status_field_id}" || -z "${target_option_id}" ]]; then
+            echo "Project Status configuration not found: ${PROJECT_TITLE} -> ${target_project_status}"
+            exit 1
+          fi
+
+          issue_project_json="$(GH_TOKEN="${PROJECT_TOKEN}" gh api graphql \
+            -f query='query($owner:String!,$repo:String!,$number:Int!) { repository(owner:$owner,name:$repo) { issue(number:$number) { id projectItems(first:100) { nodes { id project { id } } } } } }' \
+            -F owner="${owner}" \
+            -F repo="${repo}" \
+            -F number="${issue_number}")"
+
+          issue_node_id="$(jq -r '.data.repository.issue.id' <<<"${issue_project_json}")"
+          item_id="$(jq -r --arg project_id "${project_id}" '.data.repository.issue.projectItems.nodes[] | select(.project.id == $project_id) | .id' <<<"${issue_project_json}" | head -n1)"
+
+          if [[ -z "${item_id}" ]]; then
+            item_id="$(GH_TOKEN="${PROJECT_TOKEN}" gh api graphql \
+              -f query='mutation($project:ID!,$content:ID!) { addProjectV2ItemById(input:{projectId:$project,contentId:$content}) { item { id } } }' \
+              -F project="${project_id}" \
+              -F content="${issue_node_id}" \
+              --jq '.data.addProjectV2ItemById.item.id')"
+          fi
+
+          GH_TOKEN="${PROJECT_TOKEN}" gh api graphql \
+            -f query='mutation($project:ID!,$item:ID!,$field:ID!,$option:String!) { updateProjectV2ItemFieldValue(input:{projectId:$project,itemId:$item,fieldId:$field,value:{singleSelectOptionId:$option}}) { projectV2Item { id } } }' \
+            -F project="${project_id}" \
+            -F item="${item_id}" \
+            -F field="${status_field_id}" \
+            -F option="${target_option_id}" \
+            >/dev/null
+
           if [[ "${ACTION}" == "ready_for_review" ]]; then
             ensure_label "status: in-review" "FBCA04" "Pull request review için hazır"
 
@@ -96,19 +158,17 @@ jobs:
               >/dev/null
 
             remove_label_if_present "status: claimed"
-            echo "Issue #${issue_number}: Claimed -> In Review"
+            echo "Issue #${issue_number}: Claimed -> In Review (label + Project)"
             exit 0
           fi
 
-          if [[ "${ACTION}" == "converted_to_draft" ]]; then
-            ensure_label "status: claimed" "0969DA" "Bir katılımcı tarafından sahiplenilmiş Issue"
+          ensure_label "status: claimed" "0969DA" "Bir katılımcı tarafından sahiplenilmiş Issue"
 
-            gh api \
-              -X POST \
-              "repos/${REPOSITORY}/issues/${issue_number}/labels" \
-              -f "labels[]=status: claimed" \
-              >/dev/null
+          gh api \
+            -X POST \
+            "repos/${REPOSITORY}/issues/${issue_number}/labels" \
+            -f "labels[]=status: claimed" \
+            >/dev/null
 
-            remove_label_if_present "status: in-review"
-            echo "Issue #${issue_number}: In Review -> Claimed"
-          fi
+          remove_label_if_present "status: in-review"
+          echo "Issue #${issue_number}: In Review -> Claimed (label + Project)"
