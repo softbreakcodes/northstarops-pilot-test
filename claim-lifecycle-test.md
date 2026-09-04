@@ -1,1 +1,1 @@
-Issue #10 claim lifecycle test.
+Issue #10 full claim lifecycle verified.
