@@ -88,7 +88,19 @@ Production hedefi:
 
 Repository genel ayarlarında merge commit/rebase açık olsa bile ruleset `main` için yalnızca squash'a izin verebilir. Yine de production'da kafa karışıklığını azaltmak için mümkünse repository ayarlarında da yalnızca squash açık bırak.
 
-## 9. Smoke test
+## 9. ChatGPT-assisted review operating model
+
+İlk aşamada CodeRabbit veya başka bir üçüncü taraf AI reviewer zorunlu değildir.
+
+- [ ] `13-chatgpt-assisted-pr-review.md` modelini production operasyonuna dahil et.
+- [ ] PR `Ready for Review` olduğunda maintainer ChatGPT'ye PR numarası/linki ile review başlatır.
+- [ ] Review bağlı Issue + diff + changed files + tests/checks bağlamında yapılır.
+- [ ] Standart çıktı `ISSUE ALIGNMENT`, `SCOPE`, `ACCEPTANCE CRITERIA`, `TESTS`, `CODE QUALITY`, `RISK` ve `RECOMMENDATION` içerir.
+- [ ] ChatGPT GitHub'a review bırakacaksa bu maintainer'ın açık talebiyle yapılır.
+- [ ] Final merge authority maintainer'da kalır.
+- [ ] Background/automatic review gerektiğinde bunun ayrı bir integration/automation ihtiyacı olduğu kabul edilir.
+
+## 10. Smoke test
 
 Gerçek contributor yerine test hesabı ile `10-end-to-end-test-scenarios.md` içindeki testleri çalıştır.
 
@@ -102,9 +114,11 @@ Available
 → PR Admission PASS
 → Ready for Review
 → In Review
-→ Request Changes
+→ ChatGPT-assisted Review
+→ Request Changes (gerekirse)
 → same PR revision
-→ Approve
+→ re-review
+→ maintainer merge kararı
 → Squash Merge
 → Issue Closed
 → Done
@@ -118,7 +132,7 @@ Claimed + no PR → 24h timeout → Available
 
 PASS olmalı.
 
-## 10. Launch gate
+## 11. Launch gate
 
 Contributor duyurusu yapmadan önce:
 
@@ -130,5 +144,7 @@ Contributor duyurusu yapmadan önce:
 - [ ] Issue template doğru repo/project isimlerini kullanıyor.
 - [ ] CONTRIBUTING.md public katılımcı akışını anlatıyor.
 - [ ] En az bir farklı GitHub hesabıyla fork → claim → PR akışı başarıyla tamamlandı.
+- [ ] En az bir gerçek test PR'ı ChatGPT tarafından bağlı Issue bağlamında review edildi.
+- [ ] ChatGPT review sonrası same-PR revision ve re-review akışı doğrulandı.
 
 Bu gate tamamlanmadan gerçek backlog `Available` durumuna açılmamalıdır.

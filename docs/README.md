@@ -16,6 +16,7 @@ Dokümanları sırayla uygula:
 10. [10 — Uçtan Uca Test Senaryoları](10-end-to-end-test-scenarios.md)
 11. [11 — Production Migration Checklist](11-production-migration-checklist.md)
 12. [12 — Pilot Bulguları ve Test Edilmiş Düzeltmeler](12-pilot-findings-and-tested-fixes.md)
+13. [13 — ChatGPT Destekli Pull Request Review Modeli](13-chatgpt-assisted-pr-review.md)
 
 ## Kaynak gerçeklik
 
@@ -48,10 +49,12 @@ Backlog
 → Draft PR within 24h
 → Ready for Review
 → In Review
-→ Review
+→ ChatGPT-assisted Review
 → Changes Requested (gerekirse)
 → same branch / same PR revision
-→ Approve
+→ re-review
+→ Approve recommendation
+→ maintainer merge kararı
 → Squash Merge
 → Issue Closed
 → Done
@@ -64,5 +67,7 @@ Claimed + 24 saat içinde qualifying PR yok
 → claim kaldır
 → Available
 ```
+
+İlk aşamada üçüncü taraf AI reviewer zorunlu değildir. Review modeli `13-chatgpt-assisted-pr-review.md` içinde tanımlanmıştır; ChatGPT review'u kullanıcı talebiyle başlatılır ve final merge yetkisi maintainer'da kalır.
 
 Bu klasör yeni production kurulumunun operasyon sırasıdır; workflow dosyalarının kendisi için pilot `main` branch kaynak referans olarak kullanılmalıdır.
