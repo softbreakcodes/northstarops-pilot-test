@@ -1,0 +1,107 @@
+name: Claim Issue
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: claim-${{ github.repository }}-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+jobs:
+  claim:
+    if: >-
+      github.event.issue.pull_request == null &&
+      github.event.issue.state == 'open' &&
+      github.event.comment.body == '/claim'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Process claim
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          ACTOR: ${{ github.event.comment.user.login }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          issue_json="$(gh api "repos/${REPOSITORY}/issues/${ISSUE_NUMBER}")"
+
+          if ! jq -e '.labels | any(.name == "available")' <<<"${issue_json}" >/dev/null; then
+            gh api \
+              -X POST \
+              "repos/${REPOSITORY}/issues/${ISSUE_NUMBER}/comments" \
+              -f body="@${ACTOR} bu Issue şu anda claim edilebilir değil. Yalnızca \`available\` etiketli Issue'lar claim edilebilir."
+            exit 0
+          fi
+
+          current_assignee="$(jq -r '.assignees[0].login // empty' <<<"${issue_json}")"
+          if [[ -n "${current_assignee}" ]]; then
+            gh api \
+              -X POST \
+              "repos/${REPOSITORY}/issues/${ISSUE_NUMBER}/comments" \
+              -f body="@${ACTOR} bu Issue zaten @${current_assignee} tarafından claim edilmiş. Lütfen başka bir \`available\` Issue seç."
+            exit 0
+          fi
+
+          active_claims="$(gh api \
+            -X GET \
+            search/issues \
+            -f q="repo:${REPOSITORY} is:issue is:open label:claimed assignee:${ACTOR}" \
+            --jq '.total_count')"
+
+          if [[ "${active_claims}" -gt 0 ]]; then
+            gh api \
+              -X POST \
+              "repos/${REPOSITORY}/issues/${ISSUE_NUMBER}/comments" \
+              -f body="@${ACTOR} zaten aktif bir claim'in var. Yeni bir Issue claim etmeden önce mevcut çalışmanı tamamla veya claim'i bırak."
+            exit 0
+          fi
+
+          if ! gh api \
+            -X GET \
+            "repos/${REPOSITORY}/issues/${ISSUE_NUMBER}/assignees/${ACTOR}" \
+            >/dev/null 2>&1; then
+            gh api \
+              -X POST \
+              "repos/${REPOSITORY}/issues/${ISSUE_NUMBER}/comments" \
+              -f body="@${ACTOR} GitHub bu hesap için otomatik assignment'a izin vermedi. Bir maintainer'ın kontrol etmesi gerekiyor."
+            exit 0
+          fi
+
+          gh api \
+            -X POST \
+            "repos/${REPOSITORY}/issues/${ISSUE_NUMBER}/assignees" \
+            -f "assignees[]=${ACTOR}" \
+            >/dev/null
+
+          gh api \
+            -X POST \
+            "repos/${REPOSITORY}/labels" \
+            -f name="claimed" \
+            -f color="D4C5F9" \
+            -f description="This issue has an active contributor claim" \
+            >/dev/null 2>&1 || true
+
+          gh api \
+            -X POST \
+            "repos/${REPOSITORY}/issues/${ISSUE_NUMBER}/labels" \
+            -f "labels[]=claimed" \
+            >/dev/null
+
+          encoded_available="$(printf '%s' 'available' | jq -sRr @uri)"
+          gh api \
+            -X DELETE \
+            "repos/${REPOSITORY}/issues/${ISSUE_NUMBER}/labels/${encoded_available}" \
+            >/dev/null
+
+          gh api \
+            -X POST \
+            "repos/${REPOSITORY}/issues/${ISSUE_NUMBER}/comments" \
+            -f body="✅ @${ACTOR} bu Issue'yu claim etti. Geliştirmeye başlayabilirsin."
