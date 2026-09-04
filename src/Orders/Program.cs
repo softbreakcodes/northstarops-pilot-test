@@ -10,6 +10,16 @@ app.MapGet("/orders/health", () =>
     });
 });
 
+app.MapGet("/orders/readiness", () =>
+{
+    return Results.Ok(new
+    {
+        status = "ready",
+        service = "orders",
+        version = "1.0"
+    });
+});
+
 app.Run();
 
 public partial class Program
