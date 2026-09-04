@@ -1,0 +1,89 @@
+name: PR Admission
+
+on:
+  pull_request_target:
+    types: [opened, reopened, edited]
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
+concurrency:
+  group: pr-admission-${{ github.repository }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Validate claimed Issue ownership
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          reject_pr() {
+            local message="$1"
+
+            gh api \
+              -X POST \
+              "repos/${REPOSITORY}/issues/${PR_NUMBER}/comments" \
+              -f body="${message}" \
+              >/dev/null
+
+            gh api \
+              -X PATCH \
+              "repos/${REPOSITORY}/pulls/${PR_NUMBER}" \
+              -f state=closed \
+              >/dev/null
+
+            echo "PR #${PR_NUMBER} rejected: ${message}"
+            exit 0
+          }
+
+          pr_body="$(jq -r '.pull_request.body // ""' "${GITHUB_EVENT_PATH}")"
+
+          mapfile -t linked_issues < <(
+            printf '%s\n' "${pr_body}" \
+              | grep -Eio '(close[sd]?|fix(e[sd])?|resolve[sd]?) +#[0-9]+' \
+              | grep -Eo '#[0-9]+' \
+              | tr -d '#' \
+              | sort -u \
+              || true
+          )
+
+          if [[ "${#linked_issues[@]}" -ne 1 ]]; then
+            reject_pr "❌ @${PR_AUTHOR} bu PR kabul edilemez. PR açıklamasında tam olarak bir Issue 'Closes #<issue-number>' biçiminde bağlanmalıdır."
+          fi
+
+          issue_number="${linked_issues[0]}"
+
+          if ! issue_json="$(gh api "repos/${REPOSITORY}/issues/${issue_number}" 2>/dev/null)"; then
+            reject_pr "❌ @${PR_AUTHOR} bu PR kabul edilemez. Bağlanan Issue #${issue_number} bulunamadı."
+          fi
+
+          if [[ "$(jq -r '.state' <<<"${issue_json}")" != "open" ]]; then
+            reject_pr "❌ @${PR_AUTHOR} bu PR kabul edilemez. Issue #${issue_number} açık değil."
+          fi
+
+          if ! jq -e '.labels | any(.name == "status: claimed")' <<<"${issue_json}" >/dev/null; then
+            reject_pr "❌ @${PR_AUTHOR} bu PR kabul edilemez. Issue #${issue_number} aktif bir claim durumunda değil. Önce Issue /claim ile alınmalıdır."
+          fi
+
+          assignee="$(jq -r '.assignees[0].login // empty' <<<"${issue_json}")"
+
+          if [[ -z "${assignee}" ]]; then
+            reject_pr "❌ @${PR_AUTHOR} bu PR kabul edilemez. Issue #${issue_number} üzerinde aktif bir assignee bulunmuyor."
+          fi
+
+          if [[ "${assignee}" != "${PR_AUTHOR}" ]]; then
+            reject_pr "❌ @${PR_AUTHOR} bu PR kabul edilemez. Issue #${issue_number} @${assignee} tarafından claim edilmiş. Yalnızca mevcut assignee bu Issue için PR gönderebilir."
+          fi
+
+          echo "PR #${PR_NUMBER} admitted for Issue #${issue_number}; claimant @${PR_AUTHOR} matches assignee."
