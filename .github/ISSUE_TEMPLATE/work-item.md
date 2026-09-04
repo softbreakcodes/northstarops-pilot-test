@@ -43,6 +43,9 @@ Aşağıdaki alanlara dokunulmamalıdır:
 ## Contribution Rules
 
 * Issue yalnızca `Available` durumundayken alınabilir.
+* Issue'yu almak için yorum olarak `/claim` yazılmalıdır.
+* `/claim` sonrasında 24 saat içinde bu Issue'ya bağlı bir Draft PR açılmalıdır.
+* 24 saat içinde bağlı Draft PR açılmazsa claim otomatik kaldırılır ve Issue tekrar `Available` olur.
 * Bir Issue için yalnızca tek accepted active contribution kabul edilir.
 * Development contributor'ın kendi fork'undaki branch üzerinde yapılmalıdır.
 * Review feedback yeni PR açmadan aynı branch üzerinde uygulanmalıdır.
