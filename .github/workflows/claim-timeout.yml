@@ -8,7 +8,7 @@ on:
       timeout_hours:
         description: "Manual test timeout in hours"
         required: false
-        default: "48"
+        default: "24"
 
 permissions:
   contents: read
@@ -28,7 +28,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           REPOSITORY: ${{ github.repository }}
-          TIMEOUT_HOURS: ${{ inputs.timeout_hours || '48' }}
+          TIMEOUT_HOURS: ${{ inputs.timeout_hours || '24' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -151,6 +151,6 @@ jobs:
             gh api \
               -X POST \
               "repos/${REPOSITORY}/issues/${issue_number}/comments" \
-              -f body=$'<!-- northstarops-claim-timeout -->\n⏱️ @${claimant} için 48 saatlik claim süresi doldu ve bağlı bir Pull Request bulunamadı. Issue tekrar claim edilebilir duruma alındı.' \
+              -f body="$(printf '%s\n%s' '<!-- northstarops-claim-timeout -->' "⏱️ @${claimant} için ${TIMEOUT_HOURS} saatlik claim süresi doldu ve bağlı bir Pull Request bulunamadı. Issue tekrar claim edilebilir duruma alındı.")" \
               >/dev/null
           done
